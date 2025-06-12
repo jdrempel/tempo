@@ -34,8 +34,6 @@ Lexer :: struct {
   source: []byte,
   pos: int,
   char: byte,
-  token_type: Token_Type,
-  last_char: byte,
   last_token_type: Token_Type,
 }
 
@@ -56,7 +54,6 @@ lexer_read :: proc(l: ^Lexer) {
     l.char = EOF
     return
   }
-  l.last_char = l.char
   l.char = l.source[l.pos]
 }
 
@@ -88,7 +85,7 @@ lexer_consume_until :: proc(l: ^Lexer, delims: ..string) -> string {
           continue dlc
         }
       }
-    return string(l.source[start:l.pos])
+      return string(l.source[start:l.pos])
     }
   }
   return string(l.source[start:])
