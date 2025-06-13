@@ -29,7 +29,7 @@ EventKind :: enum {
 
 EventData :: union {
   ^StartEventData,
-  ^TextEventData,
+  TextEventData,
   ^EndEventData,
 }
 
@@ -65,6 +65,12 @@ init_attrs :: proc(a: ^Attrs, allocator := context.allocator) {
   a._names.allocator = allocator
   a._name_value_map = make(map[string]Maybe(string), allocator)
   a._name_value_map.allocator = allocator
+}
+
+
+attrs_destroy :: proc(a: ^Attrs) {
+  delete(a._names)
+  delete(a._name_value_map)
 }
 
 
@@ -128,8 +134,7 @@ stream_init_nodes :: proc(s: ^HtmlStream, nodes: [dynamic]^Node, allocator := co
     case ^Node_Text:
       e = new(Event)
       e.kind = .Text
-      e.data = new(TextEventData)
-      e.data.(^TextEventData)^ = v.text.value
+      e.data = v.text.value
       append(&s._events, e)
 
     case ^Node_Element:
@@ -175,45 +180,41 @@ stream_init_element :: proc(s: ^HtmlStream, el: ^Element, allocator := context.a
     s._init = true
   }
 
-  e: ^Event
-  e = new(Event)
-  e.kind = .Start
-  e.data = new(StartEventData)
-  e.data.(^StartEventData).tag = el.tag
-  e.data.(^StartEventData).attrs = el.attrs
-  append(&s._events, e)
+  start := new(Event)
+  start.kind = .Start
+  start.data = new(StartEventData)
+  start.data.(^StartEventData).tag = el.tag
+  start.data.(^StartEventData).attrs = el.attrs
+  append(&s._events, start)
 
   for child in el.children {
     switch _ in child {
     case ^Element:
-      log.debugf("Child is an Element")
       stream_init_element(s, child.(^Element), allocator) or_return
     case ^Fragment:
       log.debugf("Child is a Fragment")
       stream_init_fragment(s, child.(^Fragment), allocator) or_return
-    case ^string:
-      log.debugf("Child is a string")
-      e = new(Event)
-      e.kind = .Text
-      e.data = new(TextEventData)
-      e.data.(^TextEventData)^ = child.(^string)^
-      append(&s._events, e)
+    case string:
+      ch := new(Event)
+      ch.kind = .Text
+      ch.data = child.(string)
+      append(&s._events, ch)
     case:
       return
     }
   }
 
-  e = new(Event)
-  e.kind = .End
-  e.data = new(EndEventData)
-  e.data.(^EndEventData).tag = el.tag
-  append(&s._events, e)
+  stop := new(Event)
+  stop.kind = .End
+  stop.data = new(EndEventData)
+  stop.data.(^EndEventData).tag = el.tag
+  append(&s._events, stop)
   ok = true
   return ok
 }
 
 
-stream_init_fragment :: proc(s: ^HtmlStream, frag: ^$T, allocator := context.allocator) -> (ok: bool) {
+stream_init_fragment :: proc(s: ^HtmlStream, frag: ^Fragment, allocator := context.allocator) -> (ok: bool) {
   if typeid_of(^Element) == typeid_of(type_of(frag)) {
     log.debugf("Got ELEMENT")
   } else {
@@ -228,6 +229,29 @@ stream_init :: proc {
   stream_init_nodes,
   stream_init_element,
   stream_init_fragment,
+}
+
+
+stream_destroy :: proc (s: ^HtmlStream) {
+  for e in s._events {
+    switch v in e.data {
+    case ^StartEventData:
+      attrs_destroy(&v.attrs)
+      free(v)
+    case ^EndEventData:
+      free(v)
+    case TextEventData:
+    }
+    free(e)
+  }
+  delete(s._events)
+  free(s)
+}
+
+
+stream_destroy_nice :: proc(s: ^HtmlStream) {
+  delete(s._events)
+  free(s)
 }
 
 
@@ -291,6 +315,7 @@ stream_serialize :: proc(s: ^HtmlStream) -> (result: [dynamic]string, ok: bool) 
     "meta" = nil, 
     "param" = nil,
   }
+  defer delete(empty_tags_html)
   ser.empty_tags = empty_tags_html
 
   for event in s._events {
@@ -307,6 +332,7 @@ stream_serialize :: proc(s: ^HtmlStream) -> (result: [dynamic]string, ok: bool) 
       }
 
     case .End:
+      if event.data.(^EndEventData).tag in ser.empty_tags do break
       ser.indent_level -= 1
       append(&result, serialize_end_event(ser, event) or_return)
 

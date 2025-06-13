@@ -1,7 +1,6 @@
 package html
 
 import "base:runtime"
-import "core:log"
 
 
 HtmlParser :: struct {
@@ -64,28 +63,44 @@ parser_init :: proc {
 }
 
 
+parser_destroy :: proc(p: ^HtmlParser) {
+  for n in p.node_stream {
+    switch v in n.derived {
+    case ^Node_Attr:
+      free(v)
+    case ^Node_Element:
+      for attr in v.attrs {
+        free(attr)
+      }
+      delete(v.attrs)
+      free(v)
+    case ^Node_Text:
+      free(v)
+    case:
+    }
+  }
+  delete(p.node_stream)
+  free(p)
+}
+
+
 parse :: proc(p: ^HtmlParser) {
   parse_loop : for {
-    log.debug("At top of parse loop")
     tok := lexer_next(p.lex)
 
     switch tok.type {
     case .Tag_Start:
-      log.debugf("Tag_Start")
       if out, ok := parse_tag(p, tok); ok {
         append(&p.node_stream, out)
       } else do break parse_loop
 
     case .Text:
-      log.debugf("Text")
       append(&p.node_stream, parse_text(p, tok))
 
     case .EOF:
-      log.debugf("EOF")
       break parse_loop
 
     case .Illegal, .Tag_End, .AttrVal, .AttrKey, .Element, .Element_End:
-      log.debugf("%v", tok.type)
       fallthrough
     case:
       panic("What did you do?")
@@ -111,7 +126,6 @@ parse_tag :: proc(p: ^HtmlParser, tok: Token) -> (n: ^Node_Element, ok: bool) {
     case .AttrKey:
       if maybe_last_attr != nil && maybe_last_attr.?.value == nil {
         append(&n.attrs, maybe_last_attr.?)
-        log.debugf("Name-Only Attr: %s", maybe_last_attr.?.key.value)
         maybe_last_attr = nil
       }
       maybe_last_attr = new(Node_Attr)
@@ -123,7 +137,6 @@ parse_tag :: proc(p: ^HtmlParser, tok: Token) -> (n: ^Node_Element, ok: bool) {
       last_attr := maybe_last_attr.?
       last_attr.value = tok
       append(&n.attrs, last_attr)
-      log.debugf("Attr: %s='%s'", last_attr.key.value, last_attr.value.?.value)
       last_attr = nil
 
     case .Tag_End, .Illegal, .Text, .Tag_Start, .EOF:
@@ -144,6 +157,5 @@ parse_text :: proc(p: ^HtmlParser, tok: Token) -> (n: ^Node_Text) {
   n = new(Node_Text)
   n.derived = n
   n.text = tok
-  log.debugf("Text node: %s", n.text.value)
   return
 }

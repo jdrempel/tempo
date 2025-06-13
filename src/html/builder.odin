@@ -1,6 +1,5 @@
 package html
 
-import "core:log"
 import rf "core:reflect"
 
 
@@ -19,7 +18,7 @@ Element :: struct {
 Any_Fragment :: union {
   ^Fragment,
   ^Element,
-  ^string,
+  string,
 }
 
 
@@ -64,26 +63,42 @@ _build_3_attr :: proc(tag: string, a0: Attr, a1: Attr, a2: Attr, fs: ..Any_Fragm
 }
 
 
-@(private="file")
-_build_text :: proc(tag: string, text: ^string) -> (n: ^Element) {
-  n = _build_0_attr(tag)
-  append(&n.children, text)
-  return
-}
+// @(private="file")
+// _build_text :: proc(tag: string, text: string) -> (n: ^Element) {
+//   n = _build_0_attr(tag)
+//   append(&n.children, text)
+//   return
+// }
 
 
-build :: proc{
+tag :: proc{
   _build_0_attr,
   _build_1_attr,
   _build_2_attr,
   _build_3_attr,
-  _build_text,
+  // _build_text,
 }
 
 
-text :: proc(text: string) -> (n: Any_Fragment) {
-  n = new(string)
-  n.(^string)^ = text
+tag_destroy :: proc(t: ^Fragment) {
+  for child in t.children {
+    switch v in child {
+    case ^Element:
+      tag_destroy(v)
+    case ^Fragment:
+      tag_destroy(v)
+    case string:
+    case:
+    }
+  }
+  delete(t.children)
+  free(t)
+}
+
+
+attr :: proc(k: string, v: string) -> (a: Attr) {
+  a.key = k
+  a.value = v
   return
 }
 
