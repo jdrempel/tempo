@@ -1,14 +1,14 @@
 package html
 
 import "base:runtime"
+import "core:fmt"
 import "core:log"
 
 
 HtmlStream :: struct {
   ally: runtime.Allocator,
+  events: [dynamic]^Event,
   _cursor: int,
-  _events: [dynamic]^Event,
-  _init: bool,
 }
 
 
@@ -120,14 +120,26 @@ attrs_get_all :: proc(a: ^Attrs) -> (result: [dynamic]Attr, ok: bool) {
 }
 
 
-stream_init_nodes :: proc(s: ^HtmlStream, nodes: [dynamic]^Node, allocator := context.allocator) -> (ok: bool) {
-  if ! s._init {
-    s.ally = allocator
-    s._events = make([dynamic]^Event, allocator)
-    s._events.allocator = allocator
-    s._init = true
+stream_make :: proc(init: $T, allocator := context.allocator) -> (s: ^HtmlStream) {
+  s = new(HtmlStream)
+  stream_init_none(s, allocator)
+  ok := stream_init(s, init)
+  if !ok {
+    free(s)
+    return nil
   }
+  return
+}
 
+
+stream_init_none :: proc(s: ^HtmlStream, allocator: runtime.Allocator) {
+  s.ally = allocator
+  s.events = make([dynamic]^Event, allocator)
+  s.events.allocator = allocator
+}
+
+
+stream_init_nodes :: proc(s: ^HtmlStream, nodes: [dynamic]^Node, allocator := context.allocator) -> (ok: bool) {
   e: ^Event
   for node in nodes {
     switch v in node.derived {
@@ -135,7 +147,7 @@ stream_init_nodes :: proc(s: ^HtmlStream, nodes: [dynamic]^Node, allocator := co
       e = new(Event)
       e.kind = .Text
       e.data = v.text.value
-      append(&s._events, e)
+      append(&s.events, e)
 
     case ^Node_Element:
       e = new(Event)
@@ -159,7 +171,7 @@ stream_init_nodes :: proc(s: ^HtmlStream, nodes: [dynamic]^Node, allocator := co
           attrs_append(&e.data.(^StartEventData).attrs, key, value)
         }
       }
-      append(&s._events, e)
+      append(&s.events, e)
       
     case ^Node_Attr:
       return ok
@@ -173,19 +185,12 @@ stream_init_nodes :: proc(s: ^HtmlStream, nodes: [dynamic]^Node, allocator := co
 
 
 stream_init_element :: proc(s: ^HtmlStream, el: ^Element, allocator := context.allocator) -> (ok: bool) {
-  if ! s._init {
-    s.ally = allocator
-    s._events = make([dynamic]^Event, allocator)
-    s._events.allocator = allocator
-    s._init = true
-  }
-
   start := new(Event)
   start.kind = .Start
   start.data = new(StartEventData)
   start.data.(^StartEventData).tag = el.tag
   start.data.(^StartEventData).attrs = el.attrs
-  append(&s._events, start)
+  append(&s.events, start)
 
   for child in el.children {
     switch _ in child {
@@ -198,7 +203,7 @@ stream_init_element :: proc(s: ^HtmlStream, el: ^Element, allocator := context.a
       ch := new(Event)
       ch.kind = .Text
       ch.data = child.(string)
-      append(&s._events, ch)
+      append(&s.events, ch)
     case:
       return
     }
@@ -208,7 +213,7 @@ stream_init_element :: proc(s: ^HtmlStream, el: ^Element, allocator := context.a
   stop.kind = .End
   stop.data = new(EndEventData)
   stop.data.(^EndEventData).tag = el.tag
-  append(&s._events, stop)
+  append(&s.events, stop)
   ok = true
   return ok
 }
@@ -226,14 +231,15 @@ stream_init_fragment :: proc(s: ^HtmlStream, frag: ^Fragment, allocator := conte
 
 
 stream_init :: proc {
+  stream_init_none,
   stream_init_nodes,
   stream_init_element,
   stream_init_fragment,
 }
 
 
-stream_destroy :: proc (s: ^HtmlStream) {
-  for e in s._events {
+stream_destroy_all :: proc (s: ^HtmlStream) {
+  for e in s.events {
     switch v in e.data {
     case ^StartEventData:
       attrs_destroy(&v.attrs)
@@ -244,13 +250,13 @@ stream_destroy :: proc (s: ^HtmlStream) {
     }
     free(e)
   }
-  delete(s._events)
+  delete(s.events)
   free(s)
 }
 
 
-stream_destroy_nice :: proc(s: ^HtmlStream) {
-  delete(s._events)
+stream_destroy :: proc(s: ^HtmlStream) {
+  delete(s.events)
   free(s)
 }
 
@@ -261,29 +267,46 @@ stream_reset :: proc(s: ^HtmlStream) {
 
 
 stream_next :: proc(s: ^HtmlStream) -> (e: ^Event, ok: bool) {
-  if s._cursor >= len(s._events) {
+  if s._cursor >= len(s.events) {
     return
   }
-  e = s._events[s._cursor]
+  e = s.events[s._cursor]
   s._cursor += 1
   ok = true
   return
 }
 
 
-stream_inject :: proc(s: ^HtmlStream, e: ^Event) -> (ok: bool) {
-  inject_ok, err := inject_at(&s._events, s._cursor, e)
+stream_inject_events :: proc(s: ^HtmlStream, es: ..^Event) -> (ok: bool) {
+  inject_ok, err := inject_at_elems(&s.events, s._cursor, ..es)
   if err != nil {
     return
   }
-  s._cursor += 1
+  s._cursor += len(es)
   ok = inject_ok
   return
 }
 
 
+stream_inject_stream :: proc(s: ^HtmlStream, s2: ^HtmlStream) -> (ok: bool) {
+  inject_ok, err := inject_at_elems(&s.events, s._cursor, ..s2.events[:])
+  if err != nil {
+    return
+  }
+  s._cursor += len(s2.events)
+  ok = inject_ok
+  return
+}
+
+
+stream_inject :: proc {
+  stream_inject_events,
+  stream_inject_stream,
+}
+
+
 stream_replace :: proc(s: ^HtmlStream, e: ^Event) -> (ok: bool) {
-  assign_ok, err := assign_at(&s._events, s._cursor, e)
+  assign_ok, err := assign_at(&s.events, s._cursor, e)
   if err != nil {
     return
   }
@@ -293,7 +316,7 @@ stream_replace :: proc(s: ^HtmlStream, e: ^Event) -> (ok: bool) {
 }
 
 
-stream_serialize :: proc(s: ^HtmlStream) -> (result: [dynamic]string, ok: bool) {
+stream_serialize :: proc(s: ^HtmlStream) -> (result: [dynamic]string, ok: bool) #optional_ok {
   result = make([dynamic]string)
   ser := new(Serializer)
   defer free(ser)
@@ -318,7 +341,7 @@ stream_serialize :: proc(s: ^HtmlStream) -> (result: [dynamic]string, ok: bool) 
   defer delete(empty_tags_html)
   ser.empty_tags = empty_tags_html
 
-  for event in s._events {
+  for event in s.events {
     switch event.kind {
     case .Text:
       text_data := serialize_text_event(ser, event) or_return

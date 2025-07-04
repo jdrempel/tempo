@@ -1,6 +1,7 @@
 package html
 
 import "base:runtime"
+import "core:log"
 
 
 HtmlParser :: struct {
@@ -45,14 +46,21 @@ Node_Attr :: struct {
 }
 
 
-parser_init_bytes :: proc(p: ^HtmlParser, source: []byte, allocator := context.allocator) {
-  lexer_init(p.lex, source)
-  p.ally = allocator
-  p.node_stream = make([dynamic]^Node, allocator)
+parser_make :: proc(allocator := context.allocator) -> (p: HtmlParser) {
+  return HtmlParser{
+    lex = new(Lexer),
+    ally = allocator,
+    node_stream = make([dynamic]^Node)
+  }
 }
 
 
-parser_init_string :: proc(p: ^HtmlParser, source: string, allocator := context.allocator) {
+parser_init_bytes :: proc(p: ^HtmlParser, source: []byte) {
+  lexer_init(p.lex, source)
+}
+
+
+parser_init_string :: proc(p: ^HtmlParser, source: string) {
   parser_init_bytes(p, transmute([]byte)source)
 }
 
@@ -80,13 +88,14 @@ parser_destroy :: proc(p: ^HtmlParser) {
     }
   }
   delete(p.node_stream)
-  free(p)
+  lexer_destroy(p.lex)
 }
 
 
 parse :: proc(p: ^HtmlParser) {
   parse_loop : for {
     tok := lexer_next(p.lex)
+    log.debugf("TOK :: %#v", tok)
 
     switch tok.type {
     case .Tag_Start:

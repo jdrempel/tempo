@@ -1,4 +1,4 @@
-package src
+package tempo
 
 import "base:runtime"
 import os "core:os/os2"
